@@ -229,11 +229,11 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 	// Empty name is a special value, meaning that only the
 	// section/subsection object is to be created, with no values set.
 	if name == "" {
-		l.Warn.Printf("invalid variable: section %q subsection %q variable %q", sect, sub, name)
 		return nil
 	}
 	vVar, t := fieldFold(vSect, name)
 	if !vVar.IsValid() {
+		l.Warn.Printf("invalid variable: section %q subsection %q variable %q", sect, sub, name)
 		return nil
 	}
 	// vVal is either single-valued var, or newly allocated value within multi-valued var
