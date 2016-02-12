@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"gopkg.in/gcfg.v1/types"
+	l "github.com/launchdarkly/foundation/logger"
+	"github.com/launchdarkly/gcfg/types"
 )
 
 type tag struct {
@@ -197,6 +197,7 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 	vCfg := vPCfg.Elem()
 	vSect, _ := fieldFold(vCfg, sect)
 	if !vSect.IsValid() {
+		l.Warn.Printf("gcfg: invalid section: section %q", sect)
 		return nil
 	}
 	if vSect.Kind() == reflect.Map {
@@ -222,11 +223,13 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 		panic(fmt.Errorf("field for section must be a map or a struct: "+
 			"section %q", sect))
 	} else if sub != "" {
+		l.Warn.Printf("invalid subsection: section %q subsection %q", sect, sub)
 		return nil
 	}
 	// Empty name is a special value, meaning that only the
 	// section/subsection object is to be created, with no values set.
 	if name == "" {
+		l.Warn.Printf("invalid variable: section %q subsection %q variable %q", sect, sub, name)
 		return nil
 	}
 	vVar, t := fieldFold(vSect, name)

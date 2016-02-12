@@ -11,7 +11,7 @@ import (
 )
 
 import (
-	"gopkg.in/gcfg.v1/token"
+	"github.com/launchdarkly/gcfg/token"
 )
 
 // In an ErrorList, an error is represented by an *Error.
