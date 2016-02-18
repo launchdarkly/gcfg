@@ -7,7 +7,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-	l "github.com/launchdarkly/foundation/logger"
 	"github.com/launchdarkly/gcfg/types"
 )
 
@@ -197,7 +196,7 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 	vCfg := vPCfg.Elem()
 	vSect, _ := fieldFold(vCfg, sect)
 	if !vSect.IsValid() {
-		l.Warn.Printf("gcfg: invalid section: section %q", sect)
+		fmt.Printf("gcfg: invalid section: section %q\n", sect)
 		return nil
 	}
 	if vSect.Kind() == reflect.Map {
@@ -223,7 +222,7 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 		panic(fmt.Errorf("field for section must be a map or a struct: "+
 			"section %q", sect))
 	} else if sub != "" {
-		l.Warn.Printf("invalid subsection: section %q subsection %q", sect, sub)
+		fmt.Printf("invalid subsection: section %q subsection %q\n", sect, sub)
 		return nil
 	}
 	// Empty name is a special value, meaning that only the
@@ -233,7 +232,7 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 	}
 	vVar, t := fieldFold(vSect, name)
 	if !vVar.IsValid() {
-		l.Warn.Printf("invalid variable: section %q subsection %q variable %q", sect, sub, name)
+		fmt.Printf("invalid variable: section %q subsection %q variable %q\n", sect, sub, name)
 		return nil
 	}
 	// vVal is either single-valued var, or newly allocated value within multi-valued var
