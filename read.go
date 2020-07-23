@@ -1,14 +1,12 @@
 package gcfg
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"io/ioutil"
 	"os"
 	"strings"
-)
 
-import (
 	"github.com/launchdarkly/gcfg/scanner"
 	"github.com/launchdarkly/gcfg/token"
 )
@@ -49,14 +47,37 @@ func unquote(s string) string {
 	return string(u)
 }
 
-func readInto(config interface{}, fset *token.FileSet, file *token.File, src []byte) error {
+func readInto(config interface{}, fset *token.FileSet, file *token.File, src []byte, options ...ReadOption) error {
+	var readOptions readOptions
+	for _, o := range options {
+		o.apply(&readOptions)
+	}
+	errorHandlers := append(readOptions.errorHandlers, defaultErrorHandler)
+
+	processErrorAndMaybeStop := func(e error) bool {
+		shouldStop := false
+	CheckHandlers:
+		for _, h := range errorHandlers {
+			switch h(e) {
+			case ErrorActionStop:
+				shouldStop = true
+				break CheckHandlers
+			case ErrorActionSuppress:
+				break CheckHandlers
+			default:
+				continue
+			}
+		}
+		return shouldStop
+	}
+
 	var s scanner.Scanner
 	var errs scanner.ErrorList
 	s.Init(file, src, func(p token.Position, m string) { errs.Add(p, m) }, 0)
 	sect, sectsub := "", ""
 	pos, tok, lit := s.Scan()
 	errfn := func(msg string) error {
-		return fmt.Errorf("%s: %s", fset.Position(pos), msg)
+		return ParseError{Position: fset.Position(pos), Err: errors.New(msg)}
 	}
 	for {
 		if errs.Len() > 0 {
@@ -104,7 +125,7 @@ func readInto(config interface{}, fset *token.FileSet, file *token.File, src []b
 			// container object is created, even if there are no
 			// variables further down.
 			err := set(config, sect, sectsub, "", true, "")
-			if err != nil {
+			if err != nil && processErrorAndMaybeStop(err) {
 				return err
 			}
 		case token.IDENT:
@@ -138,7 +159,7 @@ func readInto(config interface{}, fset *token.FileSet, file *token.File, src []b
 				}
 			}
 			err := set(config, sect, sectsub, n, blank, v)
-			if err != nil {
+			if err != nil && processErrorAndMaybeStop(err) {
 				return err
 			}
 		default:
@@ -153,26 +174,35 @@ func readInto(config interface{}, fset *token.FileSet, file *token.File, src []b
 
 // ReadInto reads gcfg formatted data from reader and sets the values into the
 // corresponding fields in config.
-func ReadInto(config interface{}, reader io.Reader) error {
+//
+// You may specify ReadOptions such as ErrorHandler if you want to modify the default
+// reading behavior. See ErrorHandler for a description of error-handling behavior.
+func ReadInto(config interface{}, reader io.Reader, options ...ReadOption) error {
 	src, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return err
 	}
 	fset := token.NewFileSet()
 	file := fset.AddFile("", fset.Base(), len(src))
-	return readInto(config, fset, file, src)
+	return readInto(config, fset, file, src, options...)
 }
 
 // ReadStringInto reads gcfg formatted data from str and sets the values into
 // the corresponding fields in config.
-func ReadStringInto(config interface{}, str string) error {
+//
+// You may specify ReadOptions such as ErrorHandler if you want to modify the default
+// reading behavior. See ErrorHandler for a description of error-handling behavior.
+func ReadStringInto(config interface{}, str string, options ...ReadOption) error {
 	r := strings.NewReader(str)
-	return ReadInto(config, r)
+	return ReadInto(config, r, options...)
 }
 
 // ReadFileInto reads gcfg formatted data from the file filename and sets the
 // values into the corresponding fields in config.
-func ReadFileInto(config interface{}, filename string) error {
+//
+// You may specify ReadOptions such as ErrorHandler if you want to modify the default
+// reading behavior. See ErrorHandler for a description of error-handling behavior.
+func ReadFileInto(config interface{}, filename string, options ...ReadOption) error {
 	f, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -184,5 +214,5 @@ func ReadFileInto(config interface{}, filename string) error {
 	}
 	fset := token.NewFileSet()
 	file := fset.AddFile(filename, fset.Base(), len(src))
-	return readInto(config, fset, file, src)
+	return readInto(config, fset, file, src, options...)
 }

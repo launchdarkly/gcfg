@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
 	"github.com/launchdarkly/gcfg/types"
 )
 
@@ -196,16 +197,17 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 	vCfg := vPCfg.Elem()
 	vSect, _ := fieldFold(vCfg, sect)
 	if !vSect.IsValid() {
-		fmt.Printf("gcfg: invalid section: section %q\n", sect)
-		return nil
+		return TargetNotFoundError{ErrorLocation: ErrorLocation{Section: sect}}
 	}
 	if vSect.Kind() == reflect.Map {
 		vst := vSect.Type()
 		if vst.Key().Kind() != reflect.String ||
 			vst.Elem().Kind() != reflect.Ptr ||
 			vst.Elem().Elem().Kind() != reflect.Struct {
-			panic(fmt.Errorf("map field for section must have string keys and "+
-				" pointer-to-struct values: section %q", sect))
+			return InvalidContainerError{
+				ErrorLocation: ErrorLocation{Section: sect},
+				Message:       "map field for section must have string keys and pointer-to-struct values",
+			}
 		}
 		if vSect.IsNil() {
 			vSect.Set(reflect.MakeMap(vst))
@@ -219,11 +221,12 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 		}
 		vSect = pv.Elem()
 	} else if vSect.Kind() != reflect.Struct {
-		panic(fmt.Errorf("field for section must be a map or a struct: "+
-			"section %q", sect))
+		return InvalidContainerError{
+			ErrorLocation: ErrorLocation{Section: sect},
+			Message:       "field for section must be a map or a struct",
+		}
 	} else if sub != "" {
-		fmt.Printf("invalid subsection: section %q subsection %q\n", sect, sub)
-		return nil
+		return TargetNotFoundError{ErrorLocation: ErrorLocation{Section: sect, Subsection: sub}}
 	}
 	// Empty name is a special value, meaning that only the
 	// section/subsection object is to be created, with no values set.
@@ -232,8 +235,9 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 	}
 	vVar, t := fieldFold(vSect, name)
 	if !vVar.IsValid() {
-		fmt.Printf("invalid variable: section %q subsection %q variable %q\n", sect, sub, name)
-		return nil
+		return TargetNotFoundError{
+			ErrorLocation: ErrorLocation{Section: sect, Subsection: sub, Field: name},
+		}
 	}
 	// vVal is either single-valued var, or newly allocated value within multi-valued var
 	var vVal reflect.Value
@@ -276,12 +280,18 @@ func set(cfg interface{}, sect, sub, name string, blank bool, value string) erro
 			break
 		}
 		if err != errUnsupportedType {
-			return err
+			return ValueError{
+				ErrorLocation: ErrorLocation{Section: sect, Subsection: sub, Field: name},
+				Err:           err,
+			}
 		}
 	}
 	if !ok {
 		// in case all setters returned errUnsupportedType
-		return err
+		return ValueError{
+			ErrorLocation: ErrorLocation{Section: sect, Subsection: sub, Field: name},
+			Err:           err,
+		}
 	}
 	if isNew { // set reference if it was dereferenced and newly allocated
 		vVal.Set(vAddr)

@@ -1,6 +1,7 @@
 package gcfg
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -335,4 +336,117 @@ func TestReadFileIntoUnicode(t *testing.T) {
 	if "丙" != res.X甲.X乙 {
 		t.Errorf("got %q, wanted %q", res.X甲.X乙, "丙")
 	}
+}
+
+func TestStopOnTargetNotFound(t *testing.T) {
+	content := "\n[nonexistent]\n"
+
+	t.Run("does not stop on unknown name by default", func(t *testing.T) {
+		err := ReadStringInto(&cBasic{}, content)
+		if err != nil {
+			t.Errorf("fail: unexpected error: %v", err)
+		}
+	})
+
+	t.Run("stops on unknown name with StopOnTargetNotFound", func(t *testing.T) {
+		err := ReadStringInto(&cBasic{}, content, ErrorHandler(StopOnTargetNotFound))
+		if err == nil {
+			t.Error("fail: expected error")
+		} else if _, ok := err.(TargetNotFoundError); !ok {
+			t.Errorf("fail: expected TargetNotFoundError, got %T", err)
+		}
+	})
+
+	t.Run("StopOnTargetNotFound does not affect ValueErrors", func(t *testing.T) {
+		err := ReadStringInto(&cBasic{}, "\n[Section]\nInt = x\n", ErrorHandler(StopOnTargetNotFound))
+		if err == nil {
+			t.Error("fail: expected error")
+		} else if _, ok := err.(ValueError); !ok {
+			t.Errorf("fail: expected ValueError, got %T", err)
+		}
+	})
+}
+
+func TestErrorHandler(t *testing.T) {
+	testShouldLogErrors := func(desc, gcfg string, dest interface{}, expected interface{}, expectedErrors ...error) {
+		t.Run(desc, func(t *testing.T) {
+			receivedErrors := []error{}
+			err := ReadStringInto(dest, gcfg, ErrorHandler(func(err error) ErrorAction {
+				receivedErrors = append(receivedErrors, err)
+				return ErrorActionSuppress
+			}))
+			switch {
+			case err != nil:
+				t.Errorf("fail: got error %v, should have used error handler instead", err)
+			case !reflect.DeepEqual(receivedErrors, expectedErrors):
+				t.Errorf("fail: expected errors: %+v\nbut got: %+v\n", expectedErrors, receivedErrors)
+			case !reflect.DeepEqual(dest, expected):
+				t.Errorf("fail: expected result: %+v\nbut got: %+v\n", expected, dest)
+			default:
+				if !testing.Short() {
+					t.Logf("pass: got errors %+v", receivedErrors)
+				}
+			}
+		})
+	}
+
+	testShouldLogErrors(
+		"value error",
+		"\n[Section]\nInt = x\nName = value\nInt = y\n",
+		&cBasic{},
+		&cBasic{Section: cBasicS1{Name: "value"}},
+		ValueError{
+			ErrorLocation: ErrorLocation{Section: "Section", Field: "Int"},
+			Err:           errors.New(`failed to parse "x" as int: expected integer`),
+		},
+		ValueError{
+			ErrorLocation: ErrorLocation{Section: "Section", Field: "Int"},
+			Err:           errors.New(`failed to parse "y" as int: expected integer`),
+		},
+	)
+	testShouldLogErrors(
+		"unknown section",
+		"\n[nonexistent]\n",
+		&cBasic{},
+		&cBasic{},
+		TargetNotFoundError{ErrorLocation: ErrorLocation{Section: "nonexistent"}},
+	)
+	testShouldLogErrors(
+		"subsection with a non-map/non-struct field",
+		"\n[Section \"A\"]\n",
+		&cBasic{},
+		&cBasic{},
+		TargetNotFoundError{ErrorLocation: ErrorLocation{Section: "Section", Subsection: "A"}},
+	)
+	testShouldLogErrors(
+		"unknown field",
+		"\n[Section]\nName = a\nBadName1 = b\nBadName2 = c\nInt = 3\n",
+		&cBasic{},
+		&cBasic{Section: cBasicS1{Name: "a", Int: 3}},
+		TargetNotFoundError{ErrorLocation: ErrorLocation{Section: "Section", Field: "BadName1"}},
+		TargetNotFoundError{ErrorLocation: ErrorLocation{Section: "Section", Field: "BadName2"}},
+	)
+
+	t.Run("handler can force gcfg to stop", func(t *testing.T) {
+		stopOnlyForExtraBadField := func(e error) ErrorAction {
+			if t, ok := e.(TargetNotFoundError); ok {
+				if t.Field == "ExtraBadField" {
+					return ErrorActionStop
+				}
+			}
+			return ErrorActionNone
+		}
+		content := "\n[Section]\nName = a\nLessBadField = b\nInt = 1\nExtraBadField = c\nInt = 2\n"
+		dest := cBasic{}
+		expectedResult := cBasic{Section: cBasicS1{Name: "a", Int: 1}} // lines before ExtraBadField are processed
+		expectedErr := TargetNotFoundError{ErrorLocation: ErrorLocation{Section: "Section", Field: "ExtraBadField"}}
+		err := ReadStringInto(&dest, content, ErrorHandler(stopOnlyForExtraBadField))
+		if err == nil {
+			t.Error("fail: expected error")
+		} else if err != expectedErr {
+			t.Errorf("fail: expected %+v, got %+v", expectedErr, err)
+		} else if !reflect.DeepEqual(dest, expectedResult) {
+			t.Errorf("fail: expected %+v, got %+v", expectedResult, dest)
+		}
+	})
 }
